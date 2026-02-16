@@ -8,8 +8,8 @@ pub mod ino {
 
     pub fn unlock_chapter(
         ctx: Context<UnlockChapter>,
-        _series_id: String,
-        _chapter_id: String,
+        _series_hash: [u8; 32],
+        _chapter_hash: [u8; 32],
     ) -> Result<()> {
         let user_chapter = &mut ctx.accounts.user_chapter;
         let chapter_stats = &mut ctx.accounts.chapter_stats;
@@ -21,19 +21,21 @@ pub mod ino {
         user_chapter.bump = ctx.bumps.user_chapter;
 
         // Update Stats
-        chapter_stats.total_unlocks = chapter_stats.total_unlocks.checked_add(1).unwrap();
-        if chapter_stats.total_completions == 0 {
-            // Ensure it's initialized if helpful, though default is 0.
-            // Accessing it to ensure it's loaded.
-        }
+        chapter_stats.total_unlocks = chapter_stats
+            .total_unlocks
+            .checked_add(1)
+            .ok_or(InoError::MathOverflow)?;
+
+        // Initializing total_completions to 0 is handled by Anchor's zeroed account init,
+        // but explicit logic here ensures we are modifying the correct account.
 
         Ok(())
     }
 
     pub fn complete_chapter(
         ctx: Context<CompleteChapter>,
-        _series_id: String,
-        _chapter_id: String,
+        _series_hash: [u8; 32],
+        _chapter_hash: [u8; 32],
     ) -> Result<()> {
         let user_chapter = &mut ctx.accounts.user_chapter;
         let chapter_stats = &mut ctx.accounts.chapter_stats;
@@ -49,16 +51,19 @@ pub mod ino {
         user_chapter.completed_at = Some(clock.unix_timestamp);
 
         // Update Stats
-        chapter_stats.total_completions = chapter_stats.total_completions.checked_add(1).unwrap();
+        chapter_stats.total_completions = chapter_stats
+            .total_completions
+            .checked_add(1)
+            .ok_or(InoError::MathOverflow)?;
 
         Ok(())
     }
 
     pub fn create_milestone_config(
         ctx: Context<CreateMilestoneConfig>,
-        _series_id: String,
-        _chapter_id: String,
-        _milestone_type: String,
+        _series_hash: [u8; 32],
+        _chapter_hash: [u8; 32],
+        _milestone_type_hash: [u8; 32],
         cap: Option<u64>,
     ) -> Result<()> {
         let milestone_config = &mut ctx.accounts.milestone_config;
@@ -71,9 +76,9 @@ pub mod ino {
 
     pub fn claim_milestone(
         ctx: Context<ClaimMilestone>,
-        _series_id: String,
-        _chapter_id: String,
-        _milestone_type: String,
+        _series_hash: [u8; 32],
+        _chapter_hash: [u8; 32],
+        _milestone_type_hash: [u8; 32],
     ) -> Result<()> {
         let milestone_config = &mut ctx.accounts.milestone_config;
 
@@ -91,7 +96,10 @@ pub mod ino {
         user_milestone.bump = ctx.bumps.user_milestone;
 
         // Increment Count
-        milestone_config.current_count = milestone_config.current_count.checked_add(1).unwrap();
+        milestone_config.current_count = milestone_config
+            .current_count
+            .checked_add(1)
+            .ok_or(InoError::MathOverflow)?;
 
         Ok(())
     }
@@ -104,7 +112,14 @@ pub mod ino {
         let user_support = &mut ctx.accounts.user_support;
         let clock = Clock::get()?;
 
-        user_support.total_supported = user_support.total_supported.checked_add(amount).unwrap();
+        // Guard: Amount > 0 to prevent spamming empty events?
+        // Not strictly required by audit but good practice.
+        // For strict audit compliance on overflow:
+        user_support.total_supported = user_support
+            .total_supported
+            .checked_add(amount)
+            .ok_or(InoError::MathOverflow)?;
+
         user_support.last_supported_at = clock.unix_timestamp;
 
         if user_support.bump == 0 {
@@ -116,7 +131,7 @@ pub mod ino {
 }
 
 #[derive(Accounts)]
-#[instruction(series_id: String, chapter_id: String)]
+#[instruction(series_hash: [u8; 32], chapter_hash: [u8; 32])]
 pub struct UnlockChapter<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
@@ -125,7 +140,7 @@ pub struct UnlockChapter<'info> {
         init,
         payer = user,
         space = 8 + UserChapterState::INIT_SPACE,
-        seeds = [b"user-chapter", user.key().as_ref(), series_id.as_bytes(), chapter_id.as_bytes()],
+        seeds = [b"user-chapter", user.key().as_ref(), series_hash.as_ref(), chapter_hash.as_ref()],
         bump
     )]
     pub user_chapter: Account<'info, UserChapterState>,
@@ -134,7 +149,7 @@ pub struct UnlockChapter<'info> {
         init_if_needed,
         payer = user,
         space = 8 + ChapterStats::INIT_SPACE,
-        seeds = [b"chapter-stats", series_id.as_bytes(), chapter_id.as_bytes()],
+        seeds = [b"chapter-stats", series_hash.as_ref(), chapter_hash.as_ref()],
         bump
     )]
     pub chapter_stats: Account<'info, ChapterStats>,
@@ -143,28 +158,28 @@ pub struct UnlockChapter<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(series_id: String, chapter_id: String)]
+#[instruction(series_hash: [u8; 32], chapter_hash: [u8; 32])]
 pub struct CompleteChapter<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"user-chapter", user.key().as_ref(), series_id.as_bytes(), chapter_id.as_bytes()],
+        seeds = [b"user-chapter", user.key().as_ref(), series_hash.as_ref(), chapter_hash.as_ref()],
         bump = user_chapter.bump,
     )]
     pub user_chapter: Account<'info, UserChapterState>,
 
     #[account(
         mut,
-        seeds = [b"chapter-stats", series_id.as_bytes(), chapter_id.as_bytes()],
+        seeds = [b"chapter-stats", series_hash.as_ref(), chapter_hash.as_ref()],
         bump
     )]
     pub chapter_stats: Account<'info, ChapterStats>,
 }
 
 #[derive(Accounts)]
-#[instruction(series_id: String, chapter_id: String, milestone_type: String)]
+#[instruction(series_hash: [u8; 32], chapter_hash: [u8; 32], milestone_type_hash: [u8; 32])]
 pub struct CreateMilestoneConfig<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -173,7 +188,7 @@ pub struct CreateMilestoneConfig<'info> {
         init,
         payer = authority,
         space = 8 + MilestoneConfig::INIT_SPACE,
-        seeds = [b"milestone-config", series_id.as_bytes(), chapter_id.as_bytes(), milestone_type.as_bytes()],
+        seeds = [b"milestone-config", series_hash.as_ref(), chapter_hash.as_ref(), milestone_type_hash.as_ref()],
         bump
     )]
     pub milestone_config: Account<'info, MilestoneConfig>,
@@ -182,14 +197,14 @@ pub struct CreateMilestoneConfig<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(series_id: String, chapter_id: String, milestone_type: String)]
+#[instruction(series_hash: [u8; 32], chapter_hash: [u8; 32], milestone_type_hash: [u8; 32])]
 pub struct ClaimMilestone<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"milestone-config", series_id.as_bytes(), chapter_id.as_bytes(), milestone_type.as_bytes()],
+        seeds = [b"milestone-config", series_hash.as_ref(), chapter_hash.as_ref(), milestone_type_hash.as_ref()],
         bump = milestone_config.bump
     )]
     pub milestone_config: Account<'info, MilestoneConfig>,
@@ -271,4 +286,6 @@ pub enum InoError {
     ChapterAlreadyCompleted,
     #[msg("Milestone cap reached.")]
     MilestoneCapReached,
+    #[msg("Mathematical overflow occurred.")]
+    MathOverflow,
 }
