@@ -1,5 +1,7 @@
 # Ino Implementation Walkthrough
 
+> Historical implementation notes, retained for context. The status and "audit-grade" language below are not current verification evidence or an independent security audit. The JavaScript test harness is incomplete in this checkout. Use the [current README](README.md) for implemented scope and remaining work; no deployment is established by this document.
+
 I have successfully implemented the **Ino** On-Chain Milestone Registry.
 
 ## Implementation Details
